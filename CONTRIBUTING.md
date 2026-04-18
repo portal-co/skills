@@ -4,6 +4,25 @@ Thanks for adding to the Portal Solutions skills registry. Follow this checklist
 
 ---
 
+## Two ways to contribute a skill
+
+### A. Add a skill directly to this registry
+
+Follow the checklist below and open a PR.
+
+### B. Add a skill to a `portal-co` repo
+
+Put a `SKILL.md` at the repo root **or** create a `skills/<skill-name>/SKILL.md` directory. The importer will pick it up automatically on the next sync:
+
+```bash
+./scripts/import-skills.sh <repo-name>
+./scripts/sync-registry.sh
+```
+
+Commit `imports.json` and `registry.json` alongside the imported files.
+
+---
+
 ## Checklist
 
 - [ ] Directory name is lowercase, hyphens only (e.g. `my-skill`)

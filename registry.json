@@ -2,5 +2,11 @@
   "$schema": "https://agentskills.io/registry-schema.json",
   "registry": "Portal Solutions Agent Skills",
   "updated": "2026-04-18",
-  "skills": []
+  "skills": [
+    {
+      "name": "registry-formats",
+      "description": "Teaches the Agent Skills registry format: SKILL.md frontmatter rules, registry.json schema, directory naming conventions, and how to add, update, or validate skills in this registry. Use when creating or modifying a skill, updating registry.json, checking spec compliance, or answering questions about how this registry is structured.",
+      "path": "registry-formats"
+    }
+  ]
 }

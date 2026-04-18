@@ -110,6 +110,74 @@ The description is loaded into the agent's context on every session. It must be 
 | `Converts Figma frames to Tailwind components. Use when given a Figma URL.` | `Helps with Figma.` |
 | `Runs the test suite and retries failures. Use before opening a PR.` | `Testing helper.` |
 
+## Importing Skills from portal-co Repos
+
+Skills can be sourced directly from repos in the `portal-co` GitHub org. A repo exposes skills in one of two ways:
+
+| Convention | Location in repo | Imported to |
+|---|---|---|
+| Single skill | `SKILL.md` at repo root | `<repo>/SKILL.md` |
+| Multiple skills | `skills/<skill-name>/SKILL.md` | `<repo>/<skill-name>/SKILL.md` |
+
+### Running the importer
+
+```bash
+# Import all discoverable repos
+./scripts/import-skills.sh
+
+# Import one repo
+./scripts/import-skills.sh <repo-name>
+
+# List repos that have skills (no writes)
+./scripts/import-skills.sh --list
+
+# Preview changes without writing
+./scripts/import-skills.sh --dry-run
+
+# Overwrite locally modified files
+./scripts/import-skills.sh --force
+```
+
+After importing, always regenerate the index:
+
+```bash
+./scripts/sync-registry.sh
+```
+
+### imports.json manifest
+
+`imports.json` tracks what was imported and from where:
+
+```json
+{
+  "org": "portal-co",
+  "imports": [
+    {
+      "repo": "volar",
+      "synced": "2026-04-18",
+      "files": [
+        { "local": "volar/my-skill/SKILL.md", "sha": "<git-sha>" }
+      ]
+    }
+  ]
+}
+```
+
+The importer uses stored SHAs to skip unchanged files and warn on locally modified ones. Commit `imports.json` alongside any imported skills.
+
+### registry.json — imported skills
+
+Entries for imported skills include a `source` field:
+
+```json
+{
+  "name": "my-skill",
+  "description": "...",
+  "path": "volar/my-skill",
+  "source": "portal-co/volar"
+}
+```
+
 ## Reference
 
 Full specification: https://agentskills.io/specification

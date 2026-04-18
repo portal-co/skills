@@ -50,12 +50,28 @@ while IFS= read -r -d '' skill_file; do
 
   rel_path="${skill_dir#$REPO_ROOT/}"
 
-  echo "  + $name — $rel_path"
+  # Detect whether this skill lives under a repo-import namespace.
+  # Imported skills have a path like <repo>/<skill-name>/SKILL.md (depth >= 3
+  # from repo root), while local skills are <skill-name>/SKILL.md (depth 2).
+  source_repo=""
+  path_depth=$(echo "$rel_path" | tr -cd '/' | wc -c)
+  if [[ "$path_depth" -ge 2 ]]; then
+    source_repo=$(echo "$rel_path" | cut -d'/' -f1)
+  fi
 
-  entry=$(printf '{"name":"%s","description":"%s","path":"%s"}' \
-    "$name" \
-    "$(echo "$description" | sed 's/"/\\"/g')" \
-    "$rel_path")
+  echo "  + $name — $rel_path${source_repo:+ (from $source_repo)}"
+
+  entry=$(python3 -c "
+import json, sys
+e = {
+    'name': sys.argv[1],
+    'description': sys.argv[2],
+    'path': sys.argv[3],
+}
+if sys.argv[4]:
+    e['source'] = 'portal-co/' + sys.argv[4]
+print(json.dumps(e))
+" "$name" "$description" "$rel_path" "$source_repo")
 
   skills_json=$(echo "$skills_json" | python3 -c "
 import sys, json
