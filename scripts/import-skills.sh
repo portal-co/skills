@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
 # import-skills.sh
-# Imports skills from repos in the portal-co GitHub org.
+# Imports skills from PUBLIC repos in the portal-co GitHub org.
+# Private repos are always skipped; this registry is public.
 #
-# Each repo may expose skills in one of two ways:
-#   1. A top-level SKILL.md   → imported as <repo>/SKILL.md
-#   2. A top-level skills/    → each subdir with a SKILL.md is imported
-#      as <repo>/<skill-name>/SKILL.md (plus any sibling files)
+# Each repo may expose skills in one of these locations:
+#   1. A top-level SKILL.md           → imported as <repo>/SKILL.md
+#   2. skills/<skill-name>/SKILL.md   → imported as <repo>/<skill-name>/
+#   3. .agent/skills/<name>/SKILL.md  → imported as <repo>/<skill-name>/
+#   4. .agents/skills/<name>/SKILL.md → imported as <repo>/<skill-name>/
+#   5. .claude/skills/<name>/SKILL.md → imported as <repo>/<skill-name>/
 #
 # Imported skills land in a folder named after the repo at the registry root.
 # The manifest (imports.json) records source SHAs so reruns only overwrite
 # files that have changed upstream (unless --force is given).
 #
 # Usage:
-#   ./scripts/import-skills.sh                 # scan all org repos
-#   ./scripts/import-skills.sh <repo>          # import one repo
+#   ./scripts/import-skills.sh                 # scan all public org repos
+#   ./scripts/import-skills.sh <repo>          # import one repo (must be public)
 #   ./scripts/import-skills.sh --list          # list repos that have skills
 #   ./scripts/import-skills.sh --force         # overwrite even locally modified files
 #   ./scripts/import-skills.sh --dry-run       # show what would change, don't write
@@ -84,21 +87,42 @@ file_sha() {
   echo "$1" | jq -r '.sha // empty'
 }
 
+# ── skill directory candidates ────────────────────────────────────────────────
+# All locations a repo may store agent skills (checked in order).
+SKILL_DIRS=(
+  "skills"
+  ".agent/skills"
+  ".agents/skills"
+  ".claude/skills"
+)
+
 # ── skill discovery ──────────────────────────────────────────────────────────
 
-# Returns a list of repos to process
+# Returns a list of repos to process (public, non-archived only).
 list_repos() {
   if [[ -n "$TARGET_REPO" ]]; then
     echo "$TARGET_REPO"
     return
   fi
-  gh repo list "$ORG" --limit 200 --json name,isArchived \
-    --jq '.[] | select(.isArchived == false) | .name'
+  gh repo list "$ORG" --limit 200 --json name,isArchived,isPrivate \
+    --jq '.[] | select(.isArchived == false and .isPrivate == false) | .name'
+}
+
+# Verify a single named repo is public; exit with an error if private.
+assert_repo_public() {
+  local repo="$1"
+  local is_private
+  is_private=$(gh repo view "$ORG/$repo" --json isPrivate --jq '.isPrivate' 2>/dev/null || echo "true")
+  if [[ "$is_private" == "true" ]]; then
+    echo "Error: $ORG/$repo is private. Private repos cannot be imported into this public registry." >&2
+    exit 1
+  fi
 }
 
 # For a given repo, discover importable skill paths.
 # Outputs lines of: <type> <remote_path> <local_dest>
-#   type = file (single SKILL.md) or dir (skills/ subdir tree)
+#   file      → single SKILL.md at repo root
+#   skill_dir → a skill subdirectory (with its own SKILL.md)
 discover_skills() {
   local repo="$1"
   local found=false
@@ -111,26 +135,31 @@ discover_skills() {
     found=true
   fi
 
-  # 2. Check for a skills/ directory
-  local skills_dir
-  skills_dir=$(gh_path_json "$repo" "skills")
-  if [[ -n "$skills_dir" ]] && echo "$skills_dir" | jq -e 'type == "array"' &>/dev/null; then
-    # Each entry in skills/ that is a directory may be a skill
+  # 2. Check each candidate skills directory
+  local skills_container
+  for skills_container in "${SKILL_DIRS[@]}"; do
+    local dir_json
+    dir_json=$(gh_path_json "$repo" "$skills_container")
+    if [[ -z "$dir_json" ]] || ! echo "$dir_json" | jq -e 'type == "array"' &>/dev/null; then
+      continue
+    fi
+
+    # Each subdirectory that contains a SKILL.md is a skill
     while IFS= read -r entry_json; do
       local entry_type entry_name
       entry_type=$(echo "$entry_json" | jq -r '.type')
       entry_name=$(echo "$entry_json" | jq -r '.name')
       if [[ "$entry_type" == "dir" ]]; then
-        # Check that it contains a SKILL.md
         local skill_md
-        skill_md=$(gh_path_json "$repo" "skills/$entry_name/SKILL.md")
+        skill_md=$(gh_path_json "$repo" "$skills_container/$entry_name/SKILL.md")
         if [[ -n "$skill_md" ]] && echo "$skill_md" | jq -e '.type == "file"' &>/dev/null; then
-          echo "skill_dir skills/$entry_name $repo/$entry_name"
+          # local_dest strips the container path; skill name is what matters
+          echo "skill_dir $skills_container/$entry_name $repo/$entry_name"
           found=true
         fi
       fi
-    done < <(echo "$skills_dir" | jq -c '.[]')
-  fi
+    done < <(echo "$dir_json" | jq -c '.[]')
+  done
 
   $found || true
 }
@@ -331,8 +360,13 @@ info ""
 
 repos=$(list_repos)
 
+# For a single named repo, verify it's public before doing anything.
+if [[ -n "$TARGET_REPO" ]]; then
+  assert_repo_public "$TARGET_REPO"
+fi
+
 if $LIST_ONLY; then
-  info "Repos with skills:"
+  info "Repos with skills (public, non-archived only):"
   while IFS= read -r repo; do
     discoveries=$(discover_skills "$repo")
     if [[ -n "$discoveries" ]]; then

@@ -112,12 +112,15 @@ The description is loaded into the agent's context on every session. It must be 
 
 ## Importing Skills from portal-co Repos
 
-Skills can be sourced directly from repos in the `portal-co` GitHub org. A repo exposes skills in one of two ways:
+Skills can be sourced directly from **public** repos in the `portal-co` GitHub org. Private repos are always skipped. A repo exposes skills in any of these locations (all are checked):
 
 | Convention | Location in repo | Imported to |
 |---|---|---|
 | Single skill | `SKILL.md` at repo root | `<repo>/SKILL.md` |
-| Multiple skills | `skills/<skill-name>/SKILL.md` | `<repo>/<skill-name>/SKILL.md` |
+| Multiple skills | `skills/<skill-name>/SKILL.md` | `<repo>/<skill-name>/` |
+| Multiple skills | `.agent/skills/<skill-name>/SKILL.md` | `<repo>/<skill-name>/` |
+| Multiple skills | `.agents/skills/<skill-name>/SKILL.md` | `<repo>/<skill-name>/` |
+| Multiple skills | `.claude/skills/<skill-name>/SKILL.md` | `<repo>/<skill-name>/` |
 
 ### Running the importer
 

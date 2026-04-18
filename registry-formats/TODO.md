@@ -6,6 +6,8 @@ Tracked improvements and open questions for the `registry-formats` skill and the
 
 ## Import System (`scripts/import-skills.sh`)
 
+- [x] Exclude private repos (this registry is public)
+- [x] Check `skills/`, `.agent/skills/`, `.agents/skills/`, `.claude/skills/` for skill dirs
 - [ ] Add recursive subdirectory support for skill dirs deeper than one level (e.g. `skills/my-skill/scripts/sub/`)
 - [ ] Add `--prune` flag: remove local files for skills that have been deleted upstream
 - [ ] Support a per-repo config (e.g. `skills/.import-config.json`) to remap paths or exclude files
