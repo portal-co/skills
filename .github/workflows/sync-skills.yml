@@ -1,0 +1,129 @@
+name: Sync skills from portal-co
+
+# Keeps this registry up-to-date with skills published in portal-co repos.
+# The original repos remain the source of truth; this workflow provides
+# discoverability, updatability, and centralization.
+#
+# Triggers:
+#   • Weekly on Monday at 06:00 UTC (routine upstream sync)
+#   • Manual dispatch (run now, optionally targeting one repo)
+#   • Push to main that touches import-config.json (config-driven re-sync)
+#
+# Outcome: if any skills changed, a PR is opened against main for review.
+# Nothing is pushed directly to the default branch.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # Weekly — Monday 06:00 UTC
+
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: 'Import a single repo (leave blank for all public repos)'
+        required: false
+        default: ''
+      force:
+        description: 'Overwrite locally modified files'
+        required: false
+        default: 'false'
+        type: boolean
+
+  push:
+    branches: [main]
+    paths:
+      - 'import-config.json'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    name: Bulk import skills
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout registry
+        uses: actions/checkout@v4
+        with:
+          # Full history so we can detect locally modified files via git status
+          fetch-depth: 0
+
+      - name: Import skills
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          args=()
+          if [[ -n "${{ inputs.repo }}" ]]; then
+            args+=("${{ inputs.repo }}")
+          fi
+          if [[ "${{ inputs.force }}" == "true" ]]; then
+            args+=("--force")
+          fi
+          bash scripts/import-skills.sh "${args[@]+"${args[@]}"}"
+
+      - name: Detect changes
+        id: changes
+        run: |
+          git add -A
+          if git diff --staged --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No changes detected — registry is already up to date."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Changes detected:"
+            git diff --staged --stat
+          fi
+
+      - name: Open pull request
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DATE="$(date -u +%Y-%m-%d)"
+          BRANCH="sync/skills-${DATE}-${{ github.run_number }}"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "$BRANCH"
+          git commit -m "sync: import skills from portal-co repos (${DATE})"
+          git push origin "$BRANCH"
+
+          # Build a summary of what changed for the PR body
+          CHANGED_FILES=$(git diff origin/main..."$BRANCH" --name-only | head -50)
+          REPO_TARGET="${{ inputs.repo }}"
+          if [[ -z "$REPO_TARGET" ]]; then
+            SCOPE="all public portal-co repos"
+          else
+            SCOPE="portal-co/${REPO_TARGET}"
+          fi
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "sync: skill import from ${SCOPE} (${DATE})" \
+            --body "$(cat <<EOF
+## Automated skill sync
+
+**Source:** ${SCOPE}
+**Triggered by:** ${{ github.event_name }}
+**Date:** ${DATE}
+
+This PR was opened automatically by the [Sync skills workflow](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+
+### Changed files
+
+\`\`\`
+${CHANGED_FILES}
+\`\`\`
+
+### Review checklist
+
+- [ ] Skill content looks correct and isn't malicious
+- [ ] No private or sensitive data was included
+- [ ] \`imports.json\` and \`registry.json\` are consistent
+
+_Merge when satisfied. The source repos remain the authoritative copy — edits here will be overwritten on the next sync unless the repo is added to \`import-config.json\` exclude list._
+EOF
+)"

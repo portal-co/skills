@@ -17,15 +17,24 @@ See `registry.json` for a machine-readable list of all skills with names and des
 
 ```
 skills/
-├── README.md              # Human-readable docs
-├── AGENTS.md              # This file — agent project context
-├── CONTRIBUTING.md        # How to add a new skill
-├── registry.json          # Machine-readable skill index
+├── README.md               # Human-readable docs
+├── AGENTS.md               # This file — agent project context
+├── CONTRIBUTING.md         # How to add a new skill
+├── import-config.json      # Bulk import configuration (excludes, include_only, source_dirs)
+├── imports.json            # Manifest of imported skills (source SHAs, sync dates)
+├── registry.json           # Machine-readable skill index (auto-generated)
+├── .github/
+│   └── workflows/
+│       └── sync-skills.yml # Automated weekly import + PR workflow
 ├── scripts/
-│   ├── install.sh         # Symlinks skills into ~/.agents/skills/
-│   └── sync-registry.sh   # Regenerates registry.json from SKILL.md frontmatter
-└── <skill-name>/
-    └── SKILL.md           # Each skill follows the Agent Skills standard
+│   ├── install.sh          # Symlinks skills into ~/.agents/skills/
+│   ├── import-skills.sh    # Imports skills from portal-co repos
+│   └── sync-registry.sh    # Regenerates registry.json from SKILL.md frontmatter
+├── <skill-name>/           # Locally authored skill
+│   └── SKILL.md
+└── <repo-name>/            # Skills imported from portal-co/<repo-name>
+    └── <skill-name>/
+        └── SKILL.md
 ```
 
 ## Installation

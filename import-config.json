@@ -1,0 +1,11 @@
+{
+  "org": "portal-co",
+  "exclude": [
+    "skills"
+  ],
+  "_comments": {
+    "exclude": "Repos never imported. 'skills' is always excluded — it IS this registry. Add repo names here to opt a repo out of bulk import.",
+    "include_only": "If set, only these repos are scanned during bulk import (overrides exclude). Useful for CI testing.",
+    "source_dirs": "Overrides the default set of directories the importer checks for skill subdirectories. Default: ['skills', '.agent/skills', '.agents/skills', '.claude/skills']."
+  }
+}

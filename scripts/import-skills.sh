@@ -1,37 +1,45 @@
 #!/usr/bin/env bash
 # import-skills.sh
-# Imports skills from PUBLIC repos in the portal-co GitHub org.
+# Bulk-imports skills from PUBLIC repos in the portal-co GitHub org.
 # Private repos are always skipped; this registry is public.
 #
-# Each repo may expose skills in one of these locations:
-#   1. A top-level SKILL.md           → imported as <repo>/SKILL.md
-#   2. skills/<skill-name>/SKILL.md   → imported as <repo>/<skill-name>/
-#   3. .agent/skills/<name>/SKILL.md  → imported as <repo>/<skill-name>/
-#   4. .agents/skills/<name>/SKILL.md → imported as <repo>/<skill-name>/
-#   5. .claude/skills/<name>/SKILL.md → imported as <repo>/<skill-name>/
+# Source of truth: each portal-co repo that owns a skill.
+# This registry provides: discoverability, updatability, centralization.
 #
-# Imported skills land in a folder named after the repo at the registry root.
-# The manifest (imports.json) records source SHAs so reruns only overwrite
-# files that have changed upstream (unless --force is given).
+# Each repo may expose skills in any of these locations (all are checked):
+#   1. SKILL.md at repo root             → <repo>/SKILL.md
+#   2. skills/<name>/SKILL.md            → <repo>/<name>/
+#   3. .agent/skills/<name>/SKILL.md     → <repo>/<name>/
+#   4. .agents/skills/<name>/SKILL.md    → <repo>/<name>/
+#   5. .claude/skills/<name>/SKILL.md    → <repo>/<name>/
+#
+# Configuration: import-config.json controls excludes, include_only, and
+# which source directories to scan. See that file for the full schema.
+#
+# After a full bulk run the registry index (registry.json) is regenerated
+# automatically. Individual targeted imports print a reminder to sync manually.
 #
 # Usage:
-#   ./scripts/import-skills.sh                 # scan all public org repos
-#   ./scripts/import-skills.sh <repo>          # import one repo (must be public)
-#   ./scripts/import-skills.sh --list          # list repos that have skills
-#   ./scripts/import-skills.sh --force         # overwrite even locally modified files
-#   ./scripts/import-skills.sh --dry-run       # show what would change, don't write
+#   ./scripts/import-skills.sh                 # bulk: all public org repos
+#   ./scripts/import-skills.sh <repo>          # targeted: one repo (must be public)
+#   ./scripts/import-skills.sh --list          # list repos that expose skills
+#   ./scripts/import-skills.sh --dry-run       # preview changes, no writes
+#   ./scripts/import-skills.sh --force         # overwrite locally modified files
+#   ./scripts/import-skills.sh --no-sync       # skip auto registry sync after bulk run
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 IMPORTS_FILE="$REPO_ROOT/imports.json"
+CONFIG_FILE="$REPO_ROOT/import-config.json"
 ORG="portal-co"
 
 # ── flags ────────────────────────────────────────────────────────────────────
 LIST_ONLY=false
 FORCE=false
 DRY_RUN=false
+NO_SYNC=false
 TARGET_REPO=""
 
 for arg in "$@"; do
@@ -39,8 +47,14 @@ for arg in "$@"; do
     --list)     LIST_ONLY=true ;;
     --force)    FORCE=true ;;
     --dry-run)  DRY_RUN=true ;;
-    --*)        echo "Unknown flag: $arg" >&2; exit 1 ;;
-    *)          TARGET_REPO="$arg" ;;
+    --no-sync)  NO_SYNC=true ;;
+    --*)        echo "Error: unknown flag '$arg'" >&2; exit 1 ;;
+    *)
+      if [[ -n "$TARGET_REPO" ]]; then
+        echo "Error: only one repo name may be specified" >&2; exit 1
+      fi
+      TARGET_REPO="$arg"
+      ;;
   esac
 done
 
@@ -53,18 +67,87 @@ require_cmd() {
   command -v "$1" &>/dev/null || { echo "Error: '$1' not found. $2" >&2; exit 1; }
 }
 
-require_cmd gh   "Install the GitHub CLI: https://cli.github.com"
-require_cmd jq   "Install jq: https://stedolan.github.io/jq"
+require_cmd gh      "Install the GitHub CLI: https://cli.github.com"
+require_cmd jq      "Install jq: https://stedolan.github.io/jq"
 require_cmd python3 "Install Python 3"
 
-# Read current imports manifest
-read_imports() {
-  if [[ -f "$IMPORTS_FILE" ]]; then
-    cat "$IMPORTS_FILE"
-  else
-    echo '{"org":"'"$ORG"'","imports":[]}'
+# ── config ───────────────────────────────────────────────────────────────────
+
+# Load import-config.json. Falls back to safe defaults if absent.
+# Exports: CFG_EXCLUDE (newline-separated), CFG_INCLUDE_ONLY (newline-separated),
+#          SKILL_DIRS (array)
+load_config() {
+  # Default skill source directories
+  SKILL_DIRS=(
+    "skills"
+    ".agent/skills"
+    ".agents/skills"
+    ".claude/skills"
+  )
+
+  CFG_EXCLUDE=""
+  CFG_INCLUDE_ONLY=""
+
+  if [[ ! -f "$CONFIG_FILE" ]]; then return; fi
+
+  # Always exclude this registry repo itself (safety net regardless of config)
+  local self_name
+  self_name=$(basename "$REPO_ROOT")
+
+  CFG_EXCLUDE=$(python3 - "$CONFIG_FILE" "$self_name" <<'PYEOF'
+import sys, json
+try:
+    cfg = json.load(open(sys.argv[1]))
+except Exception:
+    cfg = {}
+self_repo = sys.argv[2]
+exclude = cfg.get("exclude", [])
+if self_repo not in exclude:
+    exclude.append(self_repo)
+print("\n".join(exclude))
+PYEOF
+  )
+
+  CFG_INCLUDE_ONLY=$(python3 - "$CONFIG_FILE" <<'PYEOF'
+import sys, json
+try:
+    cfg = json.load(open(sys.argv[1]))
+except Exception:
+    cfg = {}
+print("\n".join(cfg.get("include_only", [])))
+PYEOF
+  )
+
+  # Allow config to override the default skill source directories
+  local custom_dirs
+  custom_dirs=$(python3 - "$CONFIG_FILE" <<'PYEOF'
+import sys, json
+try:
+    cfg = json.load(open(sys.argv[1]))
+except Exception:
+    cfg = {}
+dirs = cfg.get("source_dirs", [])
+print("\n".join(dirs))
+PYEOF
+  )
+  if [[ -n "$custom_dirs" ]]; then
+    mapfile -t SKILL_DIRS <<< "$custom_dirs"
   fi
 }
+
+is_excluded() {
+  local repo="$1"
+  [[ -n "$CFG_EXCLUDE" ]] && echo "$CFG_EXCLUDE" | grep -qx "$repo"
+}
+
+is_included() {
+  local repo="$1"
+  # If include_only is empty, all non-excluded repos are included
+  [[ -z "$CFG_INCLUDE_ONLY" ]] && return 0
+  echo "$CFG_INCLUDE_ONLY" | grep -qx "$repo"
+}
+
+# ── GitHub helpers ────────────────────────────────────────────────────────────
 
 # Check if a path exists in a GitHub repo (returns the API JSON or empty)
 gh_path_json() {
@@ -72,40 +155,24 @@ gh_path_json() {
   gh api "repos/$ORG/$repo/contents/$path" 2>/dev/null || true
 }
 
-# Download a single file by its API URL, return content (base64-decoded)
-gh_file_content() {
-  local download_url="$1"
-  gh api "$download_url" 2>/dev/null \
-    | python3 -c "import sys,json,base64; d=json.load(sys.stdin); print(base64.b64decode(d['content']).decode())" \
-    2>/dev/null || \
-  # Fallback: direct download_url fetch
-  curl -fsSL "$download_url" 2>/dev/null || true
-}
+# ── repo listing & visibility ────────────────────────────────────────────────
 
-# Get the SHA of a file from the API JSON blob
-file_sha() {
-  echo "$1" | jq -r '.sha // empty'
-}
-
-# ── skill directory candidates ────────────────────────────────────────────────
-# All locations a repo may store agent skills (checked in order).
-SKILL_DIRS=(
-  "skills"
-  ".agent/skills"
-  ".agents/skills"
-  ".claude/skills"
-)
-
-# ── skill discovery ──────────────────────────────────────────────────────────
-
-# Returns a list of repos to process (public, non-archived only).
+# Returns public, non-archived repos filtered through import-config.json
 list_repos() {
   if [[ -n "$TARGET_REPO" ]]; then
     echo "$TARGET_REPO"
     return
   fi
-  gh repo list "$ORG" --limit 200 --json name,isArchived,isPrivate \
-    --jq '.[] | select(.isArchived == false and .isPrivate == false) | .name'
+
+  local all_repos
+  all_repos=$(gh repo list "$ORG" --limit 200 --json name,isArchived,isPrivate \
+    --jq '.[] | select(.isArchived == false and .isPrivate == false) | .name')
+
+  while IFS= read -r repo; do
+    is_excluded "$repo"  && continue
+    is_included "$repo"  || continue
+    echo "$repo"
+  done <<< "$all_repos"
 }
 
 # Verify a single named repo is public; exit with an error if private.
@@ -119,6 +186,8 @@ assert_repo_public() {
   fi
 }
 
+# ── skill discovery ───────────────────────────────────────────────────────────
+
 # For a given repo, discover importable skill paths.
 # Outputs lines of: <type> <remote_path> <local_dest>
 #   file      → single SKILL.md at repo root
@@ -127,7 +196,7 @@ discover_skills() {
   local repo="$1"
   local found=false
 
-  # 1. Check for top-level SKILL.md
+  # 1. Top-level SKILL.md
   local top_skill
   top_skill=$(gh_path_json "$repo" "SKILL.md")
   if [[ -n "$top_skill" ]] && echo "$top_skill" | jq -e '.type == "file"' &>/dev/null; then
@@ -135,7 +204,7 @@ discover_skills() {
     found=true
   fi
 
-  # 2. Check each candidate skills directory
+  # 2. Skill subdirectories in any configured container directory
   local skills_container
   for skills_container in "${SKILL_DIRS[@]}"; do
     local dir_json
@@ -144,7 +213,6 @@ discover_skills() {
       continue
     fi
 
-    # Each subdirectory that contains a SKILL.md is a skill
     while IFS= read -r entry_json; do
       local entry_type entry_name
       entry_type=$(echo "$entry_json" | jq -r '.type')
@@ -153,7 +221,6 @@ discover_skills() {
         local skill_md
         skill_md=$(gh_path_json "$repo" "$skills_container/$entry_name/SKILL.md")
         if [[ -n "$skill_md" ]] && echo "$skill_md" | jq -e '.type == "file"' &>/dev/null; then
-          # local_dest strips the container path; skill name is what matters
           echo "skill_dir $skills_container/$entry_name $repo/$entry_name"
           found=true
         fi
@@ -164,7 +231,7 @@ discover_skills() {
   $found || true
 }
 
-# ── file writing ─────────────────────────────────────────────────────────────
+# ── file writing ──────────────────────────────────────────────────────────────
 
 # Write a single skill file, respecting --dry-run and local-modification checks.
 # Args: repo remote_api_path local_rel_path expected_sha
@@ -176,12 +243,14 @@ write_skill_file() {
 
   local local_abs="$REPO_ROOT/$local_rel"
 
-  # Check if locally modified vs last import
   if [[ -f "$local_abs" ]] && ! $FORCE; then
     local recorded_sha
     recorded_sha=$(python3 - "$IMPORTS_FILE" "$local_rel" <<'PYEOF'
 import sys, json
-manifest = json.load(open(sys.argv[1]))
+try:
+    manifest = json.load(open(sys.argv[1]))
+except Exception:
+    manifest = {}
 target = sys.argv[2]
 for imp in manifest.get("imports", []):
     for f in imp.get("files", []):
@@ -191,7 +260,6 @@ for imp in manifest.get("imports", []):
 PYEOF
     )
     if [[ -n "$recorded_sha" && "$recorded_sha" != "$remote_sha" ]]; then
-      # Check if local file differs from the version we imported
       local git_status
       git_status=$(git -C "$REPO_ROOT" status --porcelain "$local_rel" 2>/dev/null || true)
       if [[ -n "$git_status" ]]; then
@@ -199,33 +267,30 @@ PYEOF
         return
       fi
     fi
-    # If SHA unchanged, skip download
     if [[ "$recorded_sha" == "$remote_sha" ]]; then
-      log "  = $local_rel (unchanged)"
+      log "= $local_rel (unchanged)"
       return
     fi
   fi
 
   if $DRY_RUN; then
-    log "  + $local_rel (would write)"
+    log "~ $local_rel (would write)"
     return
   fi
 
   mkdir -p "$(dirname "$local_abs")"
-  # Fetch file content via the contents API
   local content
   content=$(gh api "repos/$ORG/$repo/contents/$remote_api_path" \
     | python3 -c "import sys,json,base64; d=json.load(sys.stdin); print(base64.b64decode(d['content']).decode())")
   printf '%s' "$content" > "$local_abs"
-  log "  ↓ $local_rel"
+  log "↓ $local_rel"
 }
 
-# ── manifest update ──────────────────────────────────────────────────────────
+# ── manifest update ───────────────────────────────────────────────────────────
 
 update_manifest() {
   local repo="$1"
   shift
-  # Remaining args: pairs of "local_rel:remote_sha"
   local -a file_entries=("$@")
 
   if $DRY_RUN; then return; fi
@@ -246,13 +311,11 @@ except Exception:
 
 today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-# Build file list
 files = []
 for pair in file_pairs:
     local, sha = pair.rsplit(":", 1)
     files.append({"local": local, "sha": sha})
 
-# Find or create entry for this repo
 found = False
 for imp in manifest.get("imports", []):
     if imp.get("repo") == repo:
@@ -274,7 +337,7 @@ with open(manifest_path, "w") as f:
 PYEOF
 }
 
-# ── import a single repo ─────────────────────────────────────────────────────
+# ── single-repo import ────────────────────────────────────────────────────────
 
 import_repo() {
   local repo="$1"
@@ -297,7 +360,6 @@ import_repo() {
     local_dest=$(echo "$discovery" | awk '{print $3}')
 
     if [[ "$dtype" == "file" ]]; then
-      # Single SKILL.md at repo root
       local file_json sha
       file_json=$(gh api "repos/$ORG/$repo/contents/SKILL.md" 2>/dev/null || true)
       sha=$(echo "$file_json" | jq -r '.sha // empty')
@@ -305,17 +367,13 @@ import_repo() {
       manifest_pairs+=("$local_dest:$sha")
 
     elif [[ "$dtype" == "skill_dir" ]]; then
-      # A skill subdirectory under skills/
-      local skill_remote_dir skill_local_dir
-      skill_remote_dir="$remote_path"          # e.g. skills/my-skill
-      skill_local_dir="$local_dest"            # e.g. volar/my-skill
+      local skill_remote_dir="$remote_path"
+      local skill_local_dir="$local_dest"
 
-      # Fetch the directory listing and recursively import all files
       local dir_json
       dir_json=$(gh_path_json "$repo" "$skill_remote_dir")
       if [[ -z "$dir_json" ]]; then continue; fi
 
-      # Process all files in the skill directory (non-recursive for now; skills should be flat)
       while IFS= read -r entry; do
         local etype ename
         etype=$(echo "$entry" | jq -r '.type')
@@ -327,8 +385,9 @@ import_repo() {
           local local_file="$skill_local_dir/$ename"
           write_skill_file "$repo" "$skill_remote_dir/$ename" "$local_file" "$esha"
           manifest_pairs+=("$local_file:$esha")
+
         elif [[ "$etype" == "dir" ]]; then
-          # One level of subdirs (scripts/, references/, assets/)
+          # One level of subdirs: scripts/, references/, assets/
           local subdir_json
           subdir_json=$(gh_path_json "$repo" "$skill_remote_dir/$ename")
           while IFS= read -r subentry; do
@@ -352,38 +411,64 @@ import_repo() {
 
 # ── main ─────────────────────────────────────────────────────────────────────
 
+load_config
+
 info "Portal Solutions — Skill Importer"
 info "Org: $ORG"
-$DRY_RUN  && info "(dry run — no files will be written)"
-$FORCE    && info "(force — locally modified files will be overwritten)"
+[[ -n "$TARGET_REPO" ]] && info "Target: $TARGET_REPO" || info "Mode: bulk (all public repos)"
+$DRY_RUN && info "(dry run — no files will be written)"
+$FORCE   && info "(force — locally modified files will be overwritten)"
 info ""
+
+# For a named repo, verify it's public before doing any work
+if [[ -n "$TARGET_REPO" ]]; then
+  assert_repo_public "$TARGET_REPO"
+  if is_excluded "$TARGET_REPO"; then
+    echo "Error: '$TARGET_REPO' is listed in import-config.json exclude list." >&2
+    exit 1
+  fi
+fi
 
 repos=$(list_repos)
 
-# For a single named repo, verify it's public before doing anything.
-if [[ -n "$TARGET_REPO" ]]; then
-  assert_repo_public "$TARGET_REPO"
-fi
-
 if $LIST_ONLY; then
-  info "Repos with skills (public, non-archived only):"
+  info "Repos with skills (public, non-archived, non-excluded):"
   while IFS= read -r repo; do
     discoveries=$(discover_skills "$repo")
     if [[ -n "$discoveries" ]]; then
       echo "  $repo"
       while IFS= read -r d; do
-        echo "    $(echo "$d" | awk '{print $3}')"
+        echo "    → $(echo "$d" | awk '{print $3}')"
       done <<< "$discoveries"
     fi
   done <<< "$repos"
   exit 0
 fi
 
+imported_count=0
 while IFS= read -r repo; do
   import_repo "$repo"
+  ((imported_count++)) || true
 done <<< "$repos"
 
 info ""
-if ! $DRY_RUN; then
+
+if $DRY_RUN; then
+  info "Dry run complete — no files written."
+  exit 0
+fi
+
+# ── auto-sync registry after a bulk run ──────────────────────────────────────
+# For targeted single-repo imports, print a reminder instead of auto-syncing
+# so the user stays in control of when registry.json is updated.
+
+if [[ -n "$TARGET_REPO" ]]; then
   info "Import complete. Run ./scripts/sync-registry.sh to update registry.json."
+elif ! $NO_SYNC; then
+  info "Regenerating registry.json..."
+  bash "$SCRIPT_DIR/sync-registry.sh"
+  info ""
+  info "Bulk import complete. Commit imports.json, registry.json, and any new skill directories."
+else
+  info "Bulk import complete (--no-sync). Run ./scripts/sync-registry.sh when ready."
 fi

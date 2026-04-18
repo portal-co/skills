@@ -12,12 +12,25 @@ Follow the checklist below and open a PR.
 
 ### B. Add a skill to a `portal-co` repo
 
-Put a `SKILL.md` at the repo root **or** create a `skills/<skill-name>/SKILL.md` directory. The importer will pick it up automatically on the next sync:
+Put a `SKILL.md` at the repo root **or** create a skill directory under any of these paths:
+
+```
+skills/<skill-name>/SKILL.md
+.agent/skills/<skill-name>/SKILL.md
+.agents/skills/<skill-name>/SKILL.md
+.claude/skills/<skill-name>/SKILL.md
+```
+
+The importer picks up all four locations automatically. Pull it in on demand:
 
 ```bash
 ./scripts/import-skills.sh <repo-name>
 ./scripts/sync-registry.sh
 ```
+
+Or wait for the weekly automated sync (`.github/workflows/sync-skills.yml`), which opens a PR with any upstream changes.
+
+**Important:** the source repo is the authoritative copy. Edits made directly to an imported skill in this registry will be overwritten on the next sync. To prevent that, add the repo to `import-config.json`'s `exclude` list.
 
 Commit `imports.json` and `registry.json` alongside the imported files.
 
