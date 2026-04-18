@@ -1,6 +1,6 @@
 # Contributing a Skill
 
-Thanks for adding to the Portal Solutions skills registry. Follow this checklist to make sure your skill loads correctly in pi, Claude Code, and any other Agent Skills-compatible harness.
+Thanks for adding to the Portal Solutions skills registry. Follow this checklist to make sure your skill loads correctly in any Agent Skills-compatible harness.
 
 ---
 

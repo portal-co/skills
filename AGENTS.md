@@ -18,11 +18,11 @@ See `registry.json` for a machine-readable list of all skills with names and des
 ```
 skills/
 ├── README.md              # Human-readable docs
-├── CLAUDE.md              # This file — Claude project context
+├── AGENTS.md              # This file — agent project context
 ├── CONTRIBUTING.md        # How to add a new skill
 ├── registry.json          # Machine-readable skill index
 ├── scripts/
-│   ├── install.sh         # Symlinks skills into ~/.agents/skills/ and ~/.claude/skills/
+│   ├── install.sh         # Symlinks skills into ~/.agents/skills/
 │   └── sync-registry.sh   # Regenerates registry.json from SKILL.md frontmatter
 └── <skill-name>/
     └── SKILL.md           # Each skill follows the Agent Skills standard
@@ -30,9 +30,7 @@ skills/
 
 ## Installation
 
-Run `./scripts/install.sh` to symlink this registry into:
-- `~/.agents/skills/portal` (picked up by pi automatically)
-- `~/.claude/skills/portal` (picked up by Claude Code automatically)
+Run `./scripts/install.sh` to symlink this registry into your agent harness skills directory.
 
 Or add this directory to your harness settings manually:
 ```json
