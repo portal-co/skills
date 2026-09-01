@@ -21,14 +21,22 @@ skills/<skill-name>/SKILL.md
 .claude/skills/<skill-name>/SKILL.md
 ```
 
-The importer picks up all four locations automatically. Pull it in on demand:
+The importer picks up all four locations automatically from **public** repos. Pull it in on demand:
 
 ```bash
 ./scripts/import-skills.sh <repo-name>
 ./scripts/sync-registry.sh
 ```
 
-Or wait for the weekly automated sync (`.github/workflows/sync-skills.yml`), which opens a PR with any upstream changes.
+Private repos are never scanned by org listing. To import a specific path (public or private), add a `sources` entry in `import-config.json` or pass `--path`:
+
+```bash
+./scripts/import-skills.sh <repo-name> --path skills/the-skill
+```
+
+Those files are copied into this **public** registry — explicit repo+path is the consent gate. The weekly Action needs a `SKILLS_IMPORT_TOKEN` secret (contents:read on the private repos) to read them; public sync works without it.
+
+Or wait for the weekly automated sync (`.github/workflows/sync-skills.yml`), which opens or updates a PR on branch `sync/skills`. Run `./scripts/check-sync-action.sh` to verify the workflow YAML and GitHub access before relying on it.
 
 **Important:** the source repo is the authoritative copy. Edits made directly to an imported skill in this registry will be overwritten on the next sync. To prevent that, add the repo to `import-config.json`'s `exclude` list.
 

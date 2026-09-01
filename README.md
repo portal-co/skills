@@ -143,3 +143,11 @@ git pull
 ```
 
 No reinstallation needed — symlinks point here, so updates are live immediately.
+
+### Automated import
+
+The weekly Action (`.github/workflows/sync-skills.yml`) imports public portal-co skills plus any `sources` in `import-config.json`, then opens or updates a PR on `sync/skills`. Private paths need a `SKILLS_IMPORT_TOKEN` repo secret. Preflight:
+
+```bash
+./scripts/check-sync-action.sh
+```

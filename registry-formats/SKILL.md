@@ -112,7 +112,7 @@ The description is loaded into the agent's context on every session. It must be 
 
 ## Importing Skills from portal-co Repos
 
-Skills can be sourced directly from **public** repos in the `portal-co` GitHub org. Private repos are always skipped. A repo exposes skills in any of these locations (all are checked):
+Skills can be sourced from **public** repos in the `portal-co` GitHub org (bulk org listing skips private and archived repos). Private repos are imported only via an explicit repo+path in `import-config.json` `sources`, or `./scripts/import-skills.sh <repo> --path <subpath>`. Explicit paths are copied into this public registry — that opt-in is the consent gate. A repo exposes skills in any of these locations (all are checked for public bulk import):
 
 | Convention | Location in repo | Imported to |
 |---|---|---|
@@ -128,8 +128,11 @@ Skills can be sourced directly from **public** repos in the `portal-co` GitHub o
 # Import all discoverable repos
 ./scripts/import-skills.sh
 
-# Import one repo
+# Import one public repo
 ./scripts/import-skills.sh <repo-name>
+
+# Import one explicit path (public or private; skips full-repo discovery)
+./scripts/import-skills.sh <repo-name> --path skills/the-skill
 
 # List repos that have skills (no writes)
 ./scripts/import-skills.sh --list
@@ -140,6 +143,18 @@ Skills can be sourced directly from **public** repos in the `portal-co` GitHub o
 # Overwrite locally modified files
 ./scripts/import-skills.sh --force
 ```
+
+Private / non-standard paths go in `import-config.json` `sources` (copied into this public registry):
+
+```json
+{
+  "sources": [
+    { "repo": "private-repo", "path": "skills/the-skill" }
+  ]
+}
+```
+
+The sync Action reads private `sources` with `SKILLS_IMPORT_TOKEN` if set; otherwise `GITHUB_TOKEN` (public only). Reuses an open PR on branch `sync/skills`. Verify with `./scripts/check-sync-action.sh`.
 
 After importing, always regenerate the index:
 

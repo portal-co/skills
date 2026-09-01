@@ -6,13 +6,15 @@ Tracked improvements and open questions for the `registry-formats` skill and the
 
 ## Import System (`scripts/import-skills.sh`)
 
-- [x] Exclude private repos (this registry is public)
+- [x] Exclude private repos from bulk org listing (this registry is public)
+- [x] Private imports only via explicit repo+path (`sources[]` or `--path`); files still land in this public registry
 - [x] Check `skills/`, `.agent/skills/`, `.agents/skills/`, `.claude/skills/` for skill dirs
+- [x] GitHub Actions workflow (`sync-skills.yml`) runs import on a schedule and opens/updates PR `sync/skills`
+- [x] `scripts/check-sync-action.sh` validates workflow YAML and GitHub access before import
 - [ ] Add recursive subdirectory support for skill dirs deeper than one level (e.g. `skills/my-skill/scripts/sub/`)
 - [ ] Add `--prune` flag: remove local files for skills that have been deleted upstream
 - [ ] Support a per-repo config (e.g. `skills/.import-config.json`) to remap paths or exclude files
 - [ ] Cache GitHub API responses to avoid rate-limiting during `--list` scans across all repos
-- [ ] Add GitHub Actions workflow that runs `import-skills.sh` on a schedule and opens a PR for upstream changes
 - [ ] Handle repos that use `AGENTS.md` or non-standard filenames as skill entrypoints
 
 ## Skill

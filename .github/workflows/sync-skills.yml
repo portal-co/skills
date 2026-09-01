@@ -9,8 +9,9 @@ name: Sync skills from portal-co
 #   • Manual dispatch (run now, optionally targeting one repo)
 #   • Push to main that touches import-config.json (config-driven re-sync)
 #
-# Outcome: if any skills changed, a PR is opened against main for review.
-# Nothing is pushed directly to the default branch.
+# Outcome: if any skills changed, an open sync PR on branch sync/skills is
+# updated in place, or a new PR is opened against main. Nothing is pushed
+# directly to the default branch.
 
 on:
   schedule:
@@ -49,9 +50,14 @@ jobs:
           # Full history so we can detect locally modified files via git status
           fetch-depth: 0
 
+      - name: Check sync action
+        env:
+          GH_TOKEN: ${{ secrets.SKILLS_IMPORT_TOKEN || secrets.GITHUB_TOKEN }}
+        run: bash scripts/check-sync-action.sh
+
       - name: Import skills
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SKILLS_IMPORT_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           args=()
           if [[ -n "${{ inputs.repo }}" ]]; then
@@ -75,55 +81,17 @@ jobs:
             git diff --staged --stat
           fi
 
-      - name: Open pull request
+      - name: Open or update pull request
         if: steps.changes.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SYNC_EVENT: ${{ github.event_name }}
+          SYNC_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SYNC_REPO: ${{ inputs.repo }}
         run: |
-          DATE="$(date -u +%Y-%m-%d)"
-          BRANCH="sync/skills-${DATE}-${{ github.run_number }}"
-
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git checkout -b "$BRANCH"
-          git commit -m "sync: import skills from portal-co repos (${DATE})"
-          git push origin "$BRANCH"
-
-          # Build a summary of what changed for the PR body
-          CHANGED_FILES=$(git diff origin/main..."$BRANCH" --name-only | head -50)
-          REPO_TARGET="${{ inputs.repo }}"
-          if [[ -z "$REPO_TARGET" ]]; then
-            SCOPE="all public portal-co repos"
+          if [[ -n "$SYNC_REPO" ]]; then
+            export SYNC_SCOPE="portal-co/${SYNC_REPO}"
           else
-            SCOPE="portal-co/${REPO_TARGET}"
+            export SYNC_SCOPE="all public portal-co repos"
           fi
-
-          gh pr create \
-            --base main \
-            --head "$BRANCH" \
-            --title "sync: skill import from ${SCOPE} (${DATE})" \
-            --body "$(cat <<EOF
-## Automated skill sync
-
-**Source:** ${SCOPE}
-**Triggered by:** ${{ github.event_name }}
-**Date:** ${DATE}
-
-This PR was opened automatically by the [Sync skills workflow](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
-
-### Changed files
-
-\`\`\`
-${CHANGED_FILES}
-\`\`\`
-
-### Review checklist
-
-- [ ] Skill content looks correct and isn't malicious
-- [ ] No private or sensitive data was included
-- [ ] \`imports.json\` and \`registry.json\` are consistent
-
-_Merge when satisfied. The source repos remain the authoritative copy — edits here will be overwritten on the next sync unless the repo is added to \`import-config.json\` exclude list._
-EOF
-)"
+          bash scripts/open-sync-pr.sh
